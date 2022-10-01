@@ -1,0 +1,61 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#define GROUP_SIZE 256
+#define MAX_DIM_GROUPS 1024
+#define MAX_DIM_THREADS (GROUP_SIZE * MAX_DIM_GROUPS)
+
+#pragma kernel BitonicSortInt
+#pragma kernel InitKeys
+#pragma kernel FindCellStart
+
+int block;
+int dim;
+uint count;
+RWStructuredBuffer<uint> Keys;
+RWStructuredBuffer<uint> Values; //particle_cellID_bef
+RWStructuredBuffer<uint> cellStart;
+[numthreads(8, 1, 1)]
+void BitonicSortInt(uint3 id : SV_DispatchThreadID) {
+	uint i = id.x;//id.x + id.y * MAX_DIM_THREADS;
+	uint j = i ^ block;
+
+	if (j < i || i >= count)
+		return;
+
+	uint key_i = Keys[i];
+	uint key_j = Keys[j];
+	int value_i = Values[key_i];
+	int value_j = Values[key_j];
+
+	int diff = (value_i - value_j) * ((i & dim) == 0 ? 1 : -1);
+	if (diff > 0) {
+		Keys[i] = key_j;
+		Keys[j] = key_i;
+	}
+}
+
+[numthreads(8, 1, 1)]
+void InitKeys(uint3 id : SV_DispatchThreadID) {
+	uint i = id.x;// id.x + id.y * MAX_DIM_THREADS;
+	if (i < count)
+		Keys[i] = i;
+}
+
+[numthreads(8, 1, 1)]
+void FindCellStart(uint3 id : SV_DispatchThreadID) {
+
+	uint particleIndex = Keys[id.x];
+	uint cellIndex = Values[particleIndex];
+	if (id.x == 0)
+	{
+		cellStart[cellIndex] = id.x;
+		return;
+	}
+
+	if (Values[Keys[id.x - 1]] != cellIndex)
+	{
+		cellStart[cellIndex] = id.x;
+	}
+
+	//uint cellIndex = Values[particleIndex];
+	//InterlockedMin(cellStart[cellIndex], id.x);
+}

@@ -1,0 +1,213 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CalculateNext
+#pragma kernel MakeImage
+#pragma kernel ResetBef
+
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+RWTexture2D<float4> Result_bef;
+
+
+int imageSize;
+int imageSize_half;
+uint particleNum;
+
+RWStructuredBuffer<int> ResultTable;
+RWStructuredBuffer<int> ResultTable_bef;
+RWStructuredBuffer<int2> neighborCandidate;
+
+
+
+int candidateCount;
+
+float cohesionWeight;
+float alignmentWeight;
+float separationWeight;
+
+float directionSenstivity;
+
+float speed;
+
+int neighborRadius;
+
+float2 mousePosition;
+float2 mouseVector;
+bool mouseClicked;
+
+struct particle
+{
+	float2 position;
+	float2 direction;
+    //int groupNum;
+};
+
+
+RWStructuredBuffer<particle> particles;
+
+
+uint GetIdx1D(uint2 pos)
+{
+    return pos.y * imageSize + pos.x;
+}
+
+uint2 GetIdx2D(uint idx)
+{
+    return uint2(idx % imageSize, idx / imageSize);
+}
+float2 ModulusPosition(float2 pos)
+{
+    pos += ((pos < -imageSize_half)- (pos >= imageSize_half)) * imageSize;
+    return pos;
+}
+
+int2 ModulusPosition(int2 pos)
+{
+    pos += ((pos < -imageSize_half) - (pos >= imageSize_half)) * imageSize;
+    return pos;
+}
+
+
+[numthreads(8,1,1)]
+void CalculateNext(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= particleNum) return;
+    particle p = particles[id.x];
+
+
+    int2 positionInt = round(p.position);
+    int neighborCnt = 0;
+
+    float2 coheision = 0;
+    float2 alignment = 0;
+    float2 separation = 0;
+    float2 additional = mouseVector;//(mousePosition - p.position);
+    float2 additional2 = mousePosition - p.position;//(mousePosition - p.position);
+    float fromMouseDistance = length(additional2);
+
+    bool areaCheck_in = (fromMouseDistance <= 5 * 5 * imageSize / 1024.0);
+    //bool areaCheck_out = (fromMouseDistance <= 5 * 30 * imageSize / 1024.0);
+    float areaCheck_out = 1 / pow(fromMouseDistance,2) * 1000;//(fromMouseDistance <= 5 * 30 * imageSize / 1024.0);
+    additional *= mouseClicked * areaCheck_in; /*/ length(additional)*/;
+    additional2 *= mouseClicked * (areaCheck_in * 2 - 1) * areaCheck_out;
+
+    for (int i = 0; i < candidateCount; i++)
+    {
+        
+        int2 nPosition = positionInt + neighborCandidate[i];
+        uint pIdx = ResultTable_bef[GetIdx1D(ModulusPosition(nPosition) + imageSize_half)];
+        //if (pIdx == id.x) continue;
+        
+       
+        if (pIdx != -1)
+        {
+            particle neighbor = particles[pIdx];
+            float2 neighborPos = nPosition;
+
+
+           // float enemy = ((p.groupNum < 2) != (neighbor.groupNum < 2)) * 5 + 1;
+            coheision += neighborPos;
+            alignment += neighbor.direction;
+
+            float2 sep = p.position - neighborPos;
+            separation += normalize(sep) / length(sep);// *enemy;// (1 + (p.groupNum != neighbor.groupNum));
+            neighborCnt++;
+        }
+
+       /* int idx1D = GetIdx1D(GetIdx1D(ModulusPosition(nPosition) + imageSize_half));
+        particle_grid neighbor = ResultTable_bef[idx1D];
+        if(neighbor.position.x != imageSize)
+        {
+            coheision += neighbor.position;
+            alignment += neighbor.direction;
+
+            float2 sep = p.position - neighbor.position;
+            separation += normalize(sep) / length(sep);
+            neighborCnt++;
+        }*/
+
+    }
+
+    if (neighborCnt > 0)
+    {
+        coheision = normalize(coheision / neighborCnt - p.position);
+        alignment = normalize(alignment / neighborCnt);
+        separation = normalize(separation / neighborCnt);
+        float2 targetVec = coheision * cohesionWeight + alignment * alignmentWeight + separation * separationWeight;
+
+        if (length(targetVec) > 0)
+        {
+            targetVec = normalize(targetVec);
+            //p.direction = normalize(p.direction + targetVec);
+            p.direction = (lerp(p.direction, targetVec, directionSenstivity));
+        }
+    }
+    if(speed != 0)
+        p.direction += (additional * 30 * imageSize / 1024.0 - additional2) / speed * 0.005;
+    p.position += p.direction * speed;
+    p.position = ModulusPosition(p.position);
+    particles[id.x] = p;
+
+    int2 resultPosition = round(p.position + imageSize_half);
+
+    
+    ResultTable[GetIdx1D(resultPosition)] = id.x;
+    /*int resultIndex = GetIdx1D(resultPosition);
+    particle_grid resultParticle = ResultTable[resultIndex];
+
+    IInterlockedAdd(ResultTable[resultIndex].count, 1);
+    nterlockedAdd(ResultTable[resultIndex].position.x, p.position.x);
+    InterlockedAdd(ResultTable[resultIndex].position.y, p.position.y);
+    InterlockedAdd(ResultTable[resultIndex].direction.x, p.direction.y);
+    InterlockedAdd(ResultTable[resultIndex].direction.x, p.direction.y);*/
+
+    //float4 result = p.groupNum == 0 ? float4(1, 0.75, 0.75, 1) : float4(0.75, 0.75, 1, 1);//lerp(float4(1, 0.75, 0.75, 1), float4(0.75, 0.75, 1, 1), normalize(p.direction).y + 0.5);
+    float4 result1 = lerp(float4(1, 0.75, 0.75, 1), float4(0.75, 0.75, 1, 1), normalize(p.direction).y + 0.5);
+    float4 result2 = lerp(float4(0.7, 0.7, 1, 1), float4(0.7, 1, 0.7, 1), normalize(p.direction).x + 0.5);
+    float4 result = (result1 * 0.8 + result2 * 0.2);
+    //result.y = lerp(0.5, 1, p.direction.x + 0.5);
+    result.xyz *= clamp(0.6, 1.5, neighborCnt * 1.0 / candidateCount * 1.5   * imageSize/1024.0);
+    //result = sqrt(result);
+    Result[resultPosition] = result;//float4(p.direction.x + 0.5, 1, p.direction.y + 0.5, 1);
+    
+}
+[numthreads(8, 8, 1)]
+void ResetBef(uint3 id : SV_DispatchThreadID)
+{
+    //Result[id.xy] = float4(0, 0, 0, 1);// lerp(Result[id.xy], float4(0, 0, 0, 1)/*float4(0.1, 0, 0.5, 1)*/, 0.1);
+    Result[id.xy] = lerp(Result[id.xy], float4(0, 0, 0, 1)/*float4(0.1, 0, 0.5, 1)*/, 0.2);
+}
+[numthreads(8, 8, 1)]
+void MakeImage(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= imageSize)) return;
+    int idx1d = GetIdx1D(id.xy);
+
+    ResultTable_bef[idx1d] = ResultTable[idx1d];
+    ResultTable[idx1d] = -1;
+
+    float4 res2 = Result[id.xy];
+    //int neighborCnt = 1;// any(Result[id.xy].xyz != 0);
+    //for (int i = 0; i < candidateCount; i++)
+    //{
+    //    int2 nPosition = id.xy + neighborCandidate[i] - imageSize_half;
+    //    int2 idx = ModulusPosition(nPosition) + imageSize_half;
+    //    if (any(Result[idx].xyz != 0))
+    //    {
+    //        res2 += Result[idx];
+    //        neighborCnt++;
+    //    }
+
+    //}
+    //res2 /= (neighborCnt);
+    Result_bef[id.xy] = res2;
+}
+
+//
+//tornado
+//0
+//10
+//0
+//0.02653717
+//2.304902
