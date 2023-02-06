@@ -212,12 +212,12 @@ public class Controller2 : MonoBehaviour
     private void OnDestroy()
     {
         //if (!gameObject.activeSelf) return;
-        boidBuffer.Release();
-        _keys.Release();
-        _values.Release();
-        _values_bef.Release();
-        _cellStart.Release();
-        neighborCandidateBuffer.Release();
+        boidBuffer?.Release();
+        _keys?.Release();
+        _values?.Release();
+        _values_bef?.Release();
+        _cellStart?.Release();
+        neighborCandidateBuffer?.Release();
     }
 
     public void ExitApp()
